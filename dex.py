@@ -1,42 +1,81 @@
-from flask import Flask, render_template, request
+from flask import Flask, render_template, request, jsonify
 from chatterbot import ChatBot
 from chatterbot.trainers import ListTrainer
-from chatterbot.trainers import ChatterBotCorpusTrainer
-
+import logging
+import re
 
 app = Flask(__name__)
-app.config.from_object('config')
 
+user_memory = {}
 
-bot = ChatBot('DEX ChatBot')
+bot = ChatBot(
+    'DEX ChatBot',
+    storage_adapter='chatterbot.storage.SQLStorageAdapter',
+    database_uri='sqlite:///database.sqlite3',
+    logic_adapters=[
+        {
+            'import_path': 'chatterbot.logic.BestMatch',
+            'default_response': 'Não entendi bem. Pode reformular?',
+            'maximum_similarity_threshold': 0.85
+        },
+        {
+            'import_path': 'chatterbot.logic.MathematicalEvaluation'  # Habilita cálculos
+        }
+    ]
+)
 
-conversa = ['Turnos do Curso de sistemas de informação','Sistemas de Informação -> Turno: Noite - Horário AB (18h35min às 20h15min) Horário CD (20h35min às 22h15min) ' ]
-bot.set_trainer(ListTrainer)
-#trainer = ChatterBotCorpusTrainer(bot)
+logging.basicConfig(level=logging.WARNING)
 
-#trainer.train("chatterbot.corpus.dex.greetings")
-#for files in os.listdir('./chatterbot_corpus1/'):
-#    data=open('./chatterbot_corpus1/'+files,'r').readlines()
-#    bot.train(data)
+def train_bot():
+    trainer = ListTrainer(bot)
+    basic_conversation = [
+        'Oi', 'Olá! Como vai você?',
+        'Tudo bem?', 'Sim, estou bem! E você?',
+        'Qual é seu nome?', 'Meu nome é DEX.',
+        'Quem te criou?', 'Fui criado por um desenvolvedor chamado Eronaldo!',
+        'Você sabe matemática?', 'Sim! Me pergunte uma conta matemática.',
+        'Obrigado', 'De nada! Estou aqui para ajudar.'
+    ]
+    trainer.train(basic_conversation)
 
-bot.train(conversa)
+train_bot()
 
-@app.route("/home/")
 @app.route("/")
+@app.route("/home")
 def index():
     return render_template('home.html')
 
-@app.route("/get")
+@app.route("/get", methods=['GET'])
 def get_bot_response():
-    userText = request.args.get('msg')
-    resposta = bot.get_response(userText)
-    if((resposta.confidence) > 0.75):
-        return str(resposta)
-    else:
-        pergunta = [userText]
-        bot.train(pergunta)
-        return str('Sua mensagem me ajudará a aprender, mas por enquanto não tenho uma resposta')
+    user_text = request.args.get('msg').strip().lower()
+
+    if 'meu nome é' in user_text:
+        nome = user_text.replace('meu nome é', '').strip().title()
+        user_memory['nome'] = nome
+        return jsonify({'response': f'Entendido! Seu nome é {nome}.', 'learned': True})
+    
+    if 'qual é o meu nome' in user_text:
+        if 'nome' in user_memory:
+            return jsonify({'response': f'Seu nome é {user_memory["nome"]}!', 'learned': False})
+        return jsonify({'response': 'Ainda não sei seu nome. Pode me dizer?', 'learned': False})
+
+    if re.match(r'^\d+(\s*[\+\-\*/]\s*\d+)+$', user_text):
+        try:
+            result = eval(user_text)
+            return jsonify({'response': f'O resultado é {result}.', 'learned': False})
+        except:
+            return jsonify({'response': 'Não consegui calcular isso. Tente algo mais simples.', 'learned': False})
+
+    if user_text in ['como você está?', 'tudo bem?', 'como vai?', 'como vai você?']:
+        return jsonify({'response': 'Estou bem! Obrigado por perguntar.', 'learned': False})
+
+    try:
+        response = bot.get_response(user_text)
+        if response.confidence < 0.5:
+            return jsonify({'response': 'Não entendi bem. Pode reformular?', 'learned': False})
+        return jsonify({'response': str(response), 'learned': False})
+    except Exception as e:
+        return jsonify({'response': 'Ocorreu um erro ao processar sua mensagem.', 'learned': False})
+
 if __name__ == "__main__":
     app.run()
-#bot.get_response(userText)
-#host='::',debug=True
