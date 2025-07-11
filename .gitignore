@@ -1,0 +1,7 @@
+# Outras pastas e arquivos ignorados...
+chatbot_env/
+__pycache__/
+.env  <-- Adicione esta linha
+.sqlite3
+.sqlite3-shm
+.sqlite3-wal
